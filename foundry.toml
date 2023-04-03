@@ -15,6 +15,12 @@
   solc = "0.8.19"
   src = "src"
   test = "test"
+  remappings = [
+    "openzeppelin/=lib/openzeppelin-contracts/",
+    "v2-periphery/=lib/v2-periphery/",
+  ]
+  fork_block_number = 58956710 
+  eth-rpc-url = "https://rpc.ftm.tools"
 
 [profile.ci]
   fuzz = { runs = 10_000 }
@@ -50,3 +56,4 @@
   optimism = "https://optimism-mainnet.infura.io/v3/${API_KEY_INFURA}"
   polygon = "https://polygon-mainnet.infura.io/v3/${API_KEY_INFURA}"
   sepolia = "https://sepolia.infura.io/v3/${API_KEY_INFURA}"
+  fantom = "http://142.132.147.140:18535"
