@@ -64,11 +64,27 @@ contract Swapper {
         );
     }
 
+    function revoke(address _token, address _spender) public onlyOwner {
+        IERC20(_token).approve(
+            _spender,
+            0
+        );
+    }
+
     function approveMulti(address[] calldata _tokens, address _spender) public onlyOwner {
         for (uint256 i = 0; i < _tokens.length; i = unsafe_inc(i)) {
             IERC20(_tokens[i]).approve(
                 _spender,
                 115_792_089_237_316_195_423_570_985_008_687_907_853_269_984_665_640_564_039_457_584_007_913_129_639_935
+            );
+        }
+    }
+
+    function revokeMulti(address[] calldata _tokens, address _spender) public onlyOwner {
+        for (uint256 i = 0; i < _tokens.length; i = unsafe_inc(i)) {
+            IERC20(_tokens[i]).approve(
+                _spender,
+                0
             );
         }
     }
