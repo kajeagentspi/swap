@@ -94,38 +94,38 @@ contract SwapperTest is StdCheats, Test {
         return result;
     }
 
-    function testSwapManual() external {
-        writeTokenBalance(address(sw), WFTM, 100_000 * 1e18);
-        console2.log("WFTM", wftm.balanceOf(address(sw)));
-        console2.log("USDC", usdc.balanceOf(address(sw)));
-        console2.log("USDT", usdt.balanceOf(address(sw)));
-        console2.log("BOO", boo.balanceOf(address(sw)));
+    // function testSwapManual() external {
+    //     writeTokenBalance(address(sw), WFTM, 100_000 * 1e18);
+    //     console2.log("WFTM", wftm.balanceOf(address(sw)));
+    //     console2.log("USDC", usdc.balanceOf(address(sw)));
+    //     console2.log("USDT", usdt.balanceOf(address(sw)));
+    //     console2.log("BOO", boo.balanceOf(address(sw)));
 
-        sw.transfer(WFTM, amountIn, address(mmVault));
-        console2.log("CONTRACT->GMX WFTM:", amountIn);
-        amountIn = sw._gmxswap(address(mmVault), WFTM, USDC, EQUALIZER_USDC_USDT_LP);
-        console2.log("GMX->EQUALIZER USDC:", amountIn);
-        amountIn = sw._solidlyswap(amountIn, EQUALIZER_USDC_USDT_LP, USDC, USDT, address(sw));
-        console2.log("EQUALIZER->CONTRACT USDT:", amountIn);
-        amountIn =
-            sw._curveswap(amountIn, CURVE_MIM_USDT_USDC_LP, CURVE_MIM_USDT_USDC_LP_USDT, CURVE_MIM_USDT_USDC_LP_USDC);
-        console2.log("CONTRACT->CRV->CONTRACT USDC:", amountIn);
-        sw.transfer(USDC, amountIn, address(SPOOKY_USDC_BOO));
-        amountIn = sw._uniswap(amountIn, SPOOKY_USDC_BOO, USDC, BOO, address(sw), SPOOKY_FEE);
-        console2.log("SPOOKY->CONTRACT BOO:", amountIn);
+    //     sw.transfer(WFTM, amountIn, address(mmVault));
+    //     console2.log("CONTRACT->GMX WFTM:", amountIn);
+    //     amountIn = sw._gmxswap(address(mmVault), WFTM, USDC, EQUALIZER_USDC_USDT_LP);
+    //     console2.log("GMX->EQUALIZER USDC:", amountIn);
+    //     amountIn = sw._solidlyswap(amountIn, EQUALIZER_USDC_USDT_LP, USDC, USDT, address(sw));
+    //     console2.log("EQUALIZER->CONTRACT USDT:", amountIn);
+    //     amountIn =
+    //         sw._curveswap(amountIn, CURVE_MIM_USDT_USDC_LP, CURVE_MIM_USDT_USDC_LP_USDT, CURVE_MIM_USDT_USDC_LP_USDC);
+    //     console2.log("CONTRACT->CRV->CONTRACT USDC:", amountIn);
+    //     sw.transfer(USDC, amountIn, address(SPOOKY_USDC_BOO));
+    //     amountIn = sw._uniswap(amountIn, SPOOKY_USDC_BOO, USDC, BOO, address(sw), SPOOKY_FEE);
+    //     console2.log("SPOOKY->CONTRACT BOO:", amountIn);
 
-        console2.log("WFTM", wftm.balanceOf(address(sw)));
-        console2.log("USDC", usdc.balanceOf(address(sw)));
-        console2.log("USDT", usdt.balanceOf(address(sw)));
-        console2.log("BOO", boo.balanceOf(address(sw)));
-        // amountOut = sw._solidlyswap(amountOut,EQUALIZER_USDC_USDT_LP,USDC,USDT,address(this));
-        // sw._curveswap(1000000000,CURVE_MIM_USDT_USDC_LP,CURVE_MIM_USDT_USDC_LP_USDC,CURVE_MIM_USDT_USDC_LP_USDT);
+    //     console2.log("WFTM", wftm.balanceOf(address(sw)));
+    //     console2.log("USDC", usdc.balanceOf(address(sw)));
+    //     console2.log("USDT", usdt.balanceOf(address(sw)));
+    //     console2.log("BOO", boo.balanceOf(address(sw)));
+    //     // amountOut = sw._solidlyswap(amountOut,EQUALIZER_USDC_USDT_LP,USDC,USDT,address(this));
+    //     // sw._curveswap(1000000000,CURVE_MIM_USDT_USDC_LP,CURVE_MIM_USDT_USDC_LP_USDC,CURVE_MIM_USDT_USDC_LP_USDT);
 
-        console2.log("WFTM", wftm.balanceOf(address(sw)));
-        console2.log("USDC", usdc.balanceOf(address(sw)));
-        console2.log("USDT", usdt.balanceOf(address(sw)));
-        console2.log("BOO", boo.balanceOf(address(sw)));
-    }
+    //     console2.log("WFTM", wftm.balanceOf(address(sw)));
+    //     console2.log("USDC", usdc.balanceOf(address(sw)));
+    //     console2.log("USDT", usdt.balanceOf(address(sw)));
+    //     console2.log("BOO", boo.balanceOf(address(sw)));
+    // }
 
     function testSwap() external {
         writeTokenBalance(address(sw), WFTM, 100_000 * 1e18);

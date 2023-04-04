@@ -208,8 +208,7 @@ contract Swapper {
         address _receiver,
         uint256 _swapFee
     )
-        public
-        onlyWhitelisted
+        internal
         returns (uint256)
     {
         (uint256 amountOut, bool reversed) = _getAmountOutUniswap(_amountIn, _pair, _tokenIn, _tokenOut,_swapFee);
@@ -225,8 +224,7 @@ contract Swapper {
         address _tokenOut,
         address _receiver
     )
-        public
-        onlyWhitelisted
+        internal
         returns (uint256 amountOut)
     {
         amountOut = SolidlyPair(_pair).getAmountOut(_amountIn, _tokenIn);
@@ -243,8 +241,7 @@ contract Swapper {
         address _tokenOut,
         address _receiver
     )
-        public
-        onlyWhitelisted
+        internal
         returns (uint256)
     {
         return GMXVault(_vaultAddress).swap(_tokenIn, _tokenOut, _receiver);
@@ -256,8 +253,7 @@ contract Swapper {
         int128 _tokenInIndex,
         int128 _tokenOutIndex
     )
-        public
-        onlyWhitelisted
+        internal
         returns (uint256 amountOut)
     {
         amountOut = CurveFi(_pair).get_dy(_tokenInIndex, _tokenOutIndex, _amountIn);
