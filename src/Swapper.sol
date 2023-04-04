@@ -122,7 +122,7 @@ contract Swapper {
         // solidly 112=32+20+20+20+20
         // gmx      80=20+20+20+20
         // curve    54=32+20+1+1 use uint8 for indexes
-        // _swapData routeLength, amountIn 32, swapData0Length,swapData1Length...,swapData0,swapData1
+        // _swapData routeLength, dexType0, dexType1..., amountIn, minAmountOut, ,swapData0, swapData1...
         uint8 routeLength;
         uint256[5] memory dexTypes;
         assembly {
