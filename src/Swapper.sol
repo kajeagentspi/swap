@@ -9,15 +9,15 @@ interface IERC20 {
 
 interface IUniswapV2Pair {
     function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
-    function swap(uint256 _amount0Out, uint256 _amount1Out, address _to, bytes calldata _data) external;
+    function swap(uint256 _amount0Out, uint256 _amount1Out, address _receiver, bytes calldata _data) external;
 }
 
 interface SolidlyPair {
     function getAmountOut(uint256 _amountIn, address _tokenIn) external view returns (uint256);
-    function swap(uint256 _amount0Out, uint256 _amount1Out, address _to, bytes calldata _data) external;
+    function swap(uint256 _amount0Out, uint256 _amount1Out, address _receiver, bytes calldata _data) external;
 }
 
-interface MummyVault {
+interface GMXVault {
     function swap(address _tokenIn, address _tokenOut, address _receiver) external returns (uint256);
 }
 
@@ -36,6 +36,11 @@ contract Swapper {
 
     address public owner;
     mapping(address => bool) public whitelist;
+
+    uint256 private constant UNISWAP = 1;
+    uint256 private constant SOLIDLY = 2;
+    uint256 private constant GMX = 3;
+    uint256 private constant CURVE = 4;
 
     constructor() {
         owner = msg.sender;
@@ -107,26 +112,109 @@ contract Swapper {
         }
     }
 
-    function transfer(address token, uint256 amount, address to) public onlyWhitelisted {
-        IERC20(token).transfer(to, amount);
+    function transfer(address _token, uint256 _amount, address _receiver) public onlyWhitelisted {
+        IERC20(_token).transfer(_receiver, _amount);
+    }
+
+    // SWAP MULTIPLE
+    function swap(bytes memory _routeData) public onlyWhitelisted {
+        // uniswap 114=32+20+20+20+20+2
+        // solidly 112=32+20+20+20+20
+        // gmx      80=20+20+20+20
+        // curve    54=32+20+1+1 use uint8 for indexes
+        // _swapData routeLength, amountIn 32, swapData0Length,swapData1Length...,swapData0,swapData1
+        uint8 routeLength;
+        uint256[5] memory dexTypes;
+        assembly {
+            routeLength := mload(add(add(_routeData, 0x1), 0))
+        }
+        for (uint256 i = 1; i < routeLength + 1; i = unsafe_inc(i)) {
+            uint8 tempSize;
+            assembly {
+                tempSize := mload(add(add(_routeData, 0x1), i))
+            }
+            dexTypes[i - 1] = tempSize;
+        }
+        uint256 currentIndex = 1 + routeLength;
+        uint256 amountIn;
+        uint256 minAmountOut;
+        assembly {
+            amountIn := mload(add(add(_routeData, 0x20), currentIndex))
+            minAmountOut := mload(add(add(_routeData, 0x20), add(currentIndex, 32)))
+        }
+        currentIndex += 64; //increment index after reading amountIn
+        address receiver;
+        for (uint256 i = 0; i < routeLength; i = unsafe_inc(i)) {
+            // When last in route or curve (not actually needed)
+            if (i + 1 == routeLength || dexTypes[i] == CURVE || dexTypes[i + 1] == CURVE) {
+                receiver = address(this);
+            } else {
+                uint256 toAddressIndex = currentIndex + 60;
+                assembly {
+                    receiver := div(mload(add(add(_routeData, 0x20), toAddressIndex)), 0x1000000000000000000000000)
+                }
+            }
+            if (dexTypes[i] == UNISWAP || dexTypes[i] == SOLIDLY || dexTypes[i] == GMX) {
+                address pair; //vault address in the case of gmx
+                address tokenIn;
+                address tokenOut;
+                assembly {
+                    pair := div(mload(add(add(_routeData, 0x20), currentIndex)), 0x1000000000000000000000000)
+                    tokenIn :=
+                        div(mload(add(add(_routeData, 0x20), add(currentIndex, 20))), 0x1000000000000000000000000)
+                    tokenOut :=
+                        div(mload(add(add(_routeData, 0x20), add(currentIndex, 40))), 0x1000000000000000000000000)
+                }
+                currentIndex += 60;
+                if (i == 0|| dexTypes[i-1] == CURVE) {
+                    IERC20(tokenIn).transfer(pair, amountIn);
+                }
+                if(dexTypes[i]==UNISWAP){
+                    uint16 _swapFee;
+                    assembly {
+                        _swapFee := mload(add(add(_routeData, 0x2), currentIndex))
+                    }
+                    uint256 swapFee = _swapFee;
+                    currentIndex+=2;
+                    amountIn=_uniswap(amountIn,pair,tokenIn,tokenOut,receiver,swapFee);
+                }
+                else if(dexTypes[i]==SOLIDLY){
+                    amountIn = _solidlyswap(amountIn,pair,tokenIn,tokenOut,receiver);
+                }
+                else if(dexTypes[i]==GMX){
+                    amountIn = _gmxswap(pair,tokenIn,tokenOut,receiver);
+                }
+            } else if (dexTypes[i] == CURVE) {
+                address pair;
+                uint8 tokenInIndex;
+                uint8 tokenOutIndex;
+                assembly {
+                    pair := div(mload(add(add(_routeData, 0x20), currentIndex)), 0x1000000000000000000000000)
+                    tokenInIndex := mload(add(add(_routeData, 0x1), add(currentIndex, 20)))
+                    tokenOutIndex := mload(add(add(_routeData, 0x1), add(currentIndex, 21)))
+                }
+                currentIndex += 22;
+                amountIn=_curveswap(amountIn,pair,int128(uint128(tokenInIndex)),int128(uint128(tokenOutIndex)));
+            }
+        }
     }
 
     // SWAPS
     function _uniswap(
         uint256 _amountIn,
-        uint16 _swapFee,
         address _pair,
         address _tokenIn,
         address _tokenOut,
-        address _to
+        address _receiver,
+        uint256 _swapFee
     )
         public
         onlyWhitelisted
         returns (uint256)
     {
-        (uint256 amountOut, bool reversed) = _getAmountOutUniswap(_amountIn, _swapFee, _pair, _tokenIn, _tokenOut);
+        (uint256 amountOut, bool reversed) = _getAmountOutUniswap(_amountIn, _pair, _tokenIn, _tokenOut,_swapFee);
         (uint256 amount0Out, uint256 amount1Out) = reversed ? (uint256(0), amountOut) : (amountOut, uint256(0));
-        IUniswapV2Pair(_pair).swap(amount0Out, amount1Out, _to, new bytes(0));
+        IUniswapV2Pair(_pair).swap(amount0Out, amount1Out, _receiver, new bytes(0));
         return amountOut;
     }
 
@@ -135,7 +223,7 @@ contract Swapper {
         address _pair,
         address _tokenIn,
         address _tokenOut,
-        address _to
+        address _receiver
     )
         public
         onlyWhitelisted
@@ -145,21 +233,21 @@ contract Swapper {
         (address token0,) = _sortTokens(_tokenIn, _tokenOut);
         (uint256 amount0Out, uint256 amount1Out) =
             token0 == _tokenIn ? (uint256(0), amountOut) : (amountOut, uint256(0));
-        SolidlyPair(_pair).swap(amount0Out, amount1Out, _to, new bytes(0));
+        SolidlyPair(_pair).swap(amount0Out, amount1Out, _receiver, new bytes(0));
         return amountOut;
     }
 
-    function _mummyswap(
+    function _gmxswap(
         address _vaultAddress,
         address _tokenIn,
         address _tokenOut,
-        address _to
+        address _receiver
     )
         public
         onlyWhitelisted
         returns (uint256)
     {
-        return MummyVault(_vaultAddress).swap(_tokenIn, _tokenOut, _to);
+        return GMXVault(_vaultAddress).swap(_tokenIn, _tokenOut, _receiver);
     }
 
     function _curveswap(
@@ -172,7 +260,7 @@ contract Swapper {
         onlyWhitelisted
         returns (uint256 amountOut)
     {
-        amountOut = CurveFi(_pair).get_dy(_tokenInIndex,_tokenOutIndex,_amountIn);
+        amountOut = CurveFi(_pair).get_dy(_tokenInIndex, _tokenOutIndex, _amountIn);
         CurveFi(_pair).exchange(_tokenInIndex, _tokenOutIndex, _amountIn, 0);
         return amountOut;
     }
@@ -180,19 +268,20 @@ contract Swapper {
     // HELPERS
     function _getAmountOutUniswap(
         uint256 _amountIn,
-        uint16 _swapFee,
         address _pair,
         address _tokenIn,
-        address _tokenOut
+        address _tokenOut,
+        uint256 _swapFee
     )
         internal
         view
         returns (uint256 amountOut, bool reversed)
-    {
+    {   
         (address token0,) = _sortTokens(_tokenIn, _tokenOut);
         (uint256 reserve0, uint256 reserve1,) = IUniswapV2Pair(_pair).getReserves();
         reversed = _tokenIn == token0;
         (uint256 reserveIn, uint256 reserveOut) = reversed ? (reserve0, reserve1) : (reserve1, reserve0);
+        
         assembly {
             let amountInWithFee := mul(_amountIn, _swapFee)
             let numerator := mul(amountInWithFee, reserveOut)
