@@ -8,24 +8,35 @@ interface IERC20 {
 }
 
 interface IUniswapV2Pair {
-    function factory() external view returns (address);
-    function token0() external view returns (address);
-    function token1() external view returns (address);
     function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
-    function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external;
-    function sync() external;
+    function swap(uint256 _amount0Out, uint256 _amount1Out, address _to, bytes calldata _data) external;
+}
+
+interface SolidlyPair {
+    function getAmountOut(uint256 _amountIn, address _tokenIn) external view returns (uint256);
+    function swap(uint256 _amount0Out, uint256 _amount1Out, address _to, bytes calldata _data) external;
 }
 
 interface MummyVault {
     function swap(address _tokenIn, address _tokenOut, address _receiver) external returns (uint256);
 }
 
+interface CurveFi {
+    function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external;
+    function exchange_underlying(int128 i, int128 j, uint256 dx, uint256 min_dy) external;
+    function get_dx_underlying(int128 i, int128 j, uint256 dy) external view returns (uint256);
+    function get_dy_underlying(int128 i, int128 j, uint256 dx) external view returns (uint256);
+    function get_dx(int128 i, int128 j, uint256 dy) external view returns (uint256);
+    function get_dy(int128 i, int128 j, uint256 dx) external view returns (uint256);
+    function get_virtual_price() external view returns (uint256);
+}
+
 contract Swapper {
-    event Received(address sender, uint amount);
+    event Received(address sender, uint256 amount);
 
     address public owner;
     mapping(address => bool) public whitelist;
-    
+
     constructor() {
         owner = msg.sender;
         whitelist[msg.sender] = true;
@@ -41,24 +52,30 @@ contract Swapper {
         _;
     }
 
-    function approve(address token, address spender) public onlyOwner {
-        IERC20(token).approve(spender, 115792089237316195423570985008687907853269984665640564039457584007913129639935);
+    function approve(address _token, address _spender) public onlyOwner {
+        IERC20(_token).approve(
+            _spender,
+            115_792_089_237_316_195_423_570_985_008_687_907_853_269_984_665_640_564_039_457_584_007_913_129_639_935
+        );
     }
 
-    function approveMulti(address[] calldata tokens, address spender) public onlyOwner {
-        for (uint i = 0; i < tokens.length; i = unsafe_inc(i)) {
-            IERC20(tokens[i]).approve(spender, 115792089237316195423570985008687907853269984665640564039457584007913129639935);
+    function approveMulti(address[] calldata _tokens, address _spender) public onlyOwner {
+        for (uint256 i = 0; i < _tokens.length; i = unsafe_inc(i)) {
+            IERC20(_tokens[i]).approve(
+                _spender,
+                115_792_089_237_316_195_423_570_985_008_687_907_853_269_984_665_640_564_039_457_584_007_913_129_639_935
+            );
         }
     }
 
-    function addKeeper(address[] calldata keepers) public onlyOwner{
-        for (uint i = 0; i < keepers.length; i = unsafe_inc(i)) {
+    function addKeeper(address[] calldata keepers) public onlyOwner {
+        for (uint256 i = 0; i < keepers.length; i = unsafe_inc(i)) {
             whitelist[keepers[i]] = true;
         }
     }
 
     function removeKeeper(address[] calldata keepers) public onlyOwner {
-        for (uint i = 0; i < keepers.length; i = unsafe_inc(i)) {
+        for (uint256 i = 0; i < keepers.length; i = unsafe_inc(i)) {
             whitelist[keepers[i]] = false;
         }
     }
@@ -79,79 +96,133 @@ contract Swapper {
     function setOwner(address newOwner) public onlyOwner {
         owner = newOwner;
     }
-    
+
     function getOwner() external view returns (address) {
         return owner;
     }
 
-    function unsafe_inc(uint x) private pure returns (uint) {
-        unchecked { return x + 1; }
+    function unsafe_inc(uint256 x) private pure returns (uint256) {
+        unchecked {
+            return x + 1;
+        }
     }
 
-    function transfer(address token, uint amount, address to)public onlyWhitelisted{
+    function transfer(address token, uint256 amount, address to) public onlyWhitelisted {
         IERC20(token).transfer(to, amount);
     }
 
-    function swapArbUni(bytes calldata data) public onlyWhitelisted {
-        (uint256 amountIn, uint16[] memory fees, address[] memory pairs, address[] memory tokens) = abi.decode(data, (uint256,uint16[],address[],address[]));
-        uint startingBalance = IERC20(tokens[0]).balanceOf(address(this));
-        if(amountIn > startingBalance){
-            amountIn = startingBalance;
-        }
-        if(amountIn == 0){
-            return;
-        }
-        uint[] memory amountsOut = new uint[](pairs.length);
-        for (uint i; i < pairs.length; i = unsafe_inc(i)) {
-            if (i == 0) {
-                amountsOut[i] = _getAmountOutUniswapRO(amountIn, fees[i], pairs[i], tokens[i], tokens[i+1]);
-            } else {
-                amountsOut[i] = _getAmountOutUniswapRO(amountsOut[i-1], fees[i], pairs[i], tokens[i], tokens[i+1]);
-            }
-        }
-        if(amountIn > amountsOut[pairs.length-1]){
-            return;
-        }
-        IERC20(tokens[0]).transfer(pairs[0], amountIn);
-        for (uint i; i < pairs.length; i = unsafe_inc(i)) {
-            if (i == pairs.length - 1) { //if last pair
-                _uniswap(amountsOut[i], pairs[i], tokens[i], tokens[i+1], address(this));
-            } else { //if can do flash swap
-                _uniswap(amountsOut[i], pairs[i], tokens[i], tokens[i+1], pairs[i+1]);
-            }
-        }
-        require(startingBalance <= IERC20(tokens[0]).balanceOf(address(this)), "Arb failed 1");
+    // SWAPS
+    function _uniswap(
+        uint256 _amountIn,
+        uint16 _swapFee,
+        address _pair,
+        address _tokenIn,
+        address _tokenOut,
+        address _to
+    )
+        public
+        onlyWhitelisted
+        returns (uint256)
+    {
+        (uint256 amountOut, bool reversed) = _getAmountOutUniswap(_amountIn, _swapFee, _pair, _tokenIn, _tokenOut);
+        (uint256 amount0Out, uint256 amount1Out) = reversed ? (uint256(0), amountOut) : (amountOut, uint256(0));
+        IUniswapV2Pair(_pair).swap(amount0Out, amount1Out, _to, new bytes(0));
+        return amountOut;
     }
 
-    function mummyswap(address vaultAddress, address tokenIn, address tokenOut, address to) public onlyWhitelisted {
-        MummyVault(vaultAddress).swap(tokenIn,tokenOut,to);
+    function _solidlyswap(
+        uint256 _amountIn,
+        address _pair,
+        address _tokenIn,
+        address _tokenOut,
+        address _to
+    )
+        public
+        onlyWhitelisted
+        returns (uint256 amountOut)
+    {
+        amountOut = SolidlyPair(_pair).getAmountOut(_amountIn, _tokenIn);
+        (address token0,) = _sortTokens(_tokenIn, _tokenOut);
+        (uint256 amount0Out, uint256 amount1Out) =
+            token0 == _tokenIn ? (uint256(0), amountOut) : (amountOut, uint256(0));
+        SolidlyPair(_pair).swap(amount0Out, amount1Out, _to, new bytes(0));
+        return amountOut;
     }
 
-    function _uniswap(uint amountOut, address pair, address tokenIn, address tokenOut, address to) public onlyWhitelisted {
-        (address token0,) = _sortTokens(tokenIn, tokenOut);
-        bool isNotFlipped = tokenIn == token0;
-        (uint amount0Out, uint amount1Out) = isNotFlipped ? (uint(0), amountOut) : (amountOut, uint(0));
-        IUniswapV2Pair(pair).swap(amount0Out, amount1Out, to, new bytes(0));
+    function _mummyswap(
+        address _vaultAddress,
+        address _tokenIn,
+        address _tokenOut,
+        address _to
+    )
+        public
+        onlyWhitelisted
+        returns (uint256)
+    {
+        return MummyVault(_vaultAddress).swap(_tokenIn, _tokenOut, _to);
     }
 
-    function _getAmountOutUniswapRO(uint amountInput, uint16 fee, address pair, address tokenIn, address tokenOut) public view returns (uint amountOutput) {
-        (address token0,) = _sortTokens(tokenIn, tokenOut);
-        (uint reserve0, uint reserve1,) = IUniswapV2Pair(pair).getReserves();
-        (uint reserveInput, uint reserveOutput) = tokenIn == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
-        amountOutput = _getAmountOutUniswap(amountInput, reserveInput, reserveOutput, fee);
+    function _curveswap(
+        uint256 _amountIn,
+        address _pair,
+        int128 _tokenInIndex,
+        int128 _tokenOutIndex
+    )
+        public
+        onlyWhitelisted
+        returns (uint256 amountOut)
+    {
+        amountOut = CurveFi(_pair).get_dy(_tokenInIndex,_tokenOutIndex,_amountIn);
+        CurveFi(_pair).exchange(_tokenInIndex, _tokenOutIndex, _amountIn, 0);
+        return amountOut;
     }
 
-    function _getAmountOutUniswap(uint amountIn, uint reserveIn, uint reserveOut, uint swapFee) internal pure returns (uint amountOut) {
+    // HELPERS
+    function _getAmountOutUniswap(
+        uint256 _amountIn,
+        uint16 _swapFee,
+        address _pair,
+        address _tokenIn,
+        address _tokenOut
+    )
+        internal
+        view
+        returns (uint256 amountOut, bool reversed)
+    {
+        (address token0,) = _sortTokens(_tokenIn, _tokenOut);
+        (uint256 reserve0, uint256 reserve1,) = IUniswapV2Pair(_pair).getReserves();
+        reversed = _tokenIn == token0;
+        (uint256 reserveIn, uint256 reserveOut) = reversed ? (reserve0, reserve1) : (reserve1, reserve0);
         assembly {
-            let amountInWithFee := mul(amountIn, swapFee)
-            let numerator := mul(amountInWithFee,reserveOut)
-            let denominator := mul(reserveIn,10000)
+            let amountInWithFee := mul(_amountIn, _swapFee)
+            let numerator := mul(amountInWithFee, reserveOut)
+            let denominator := mul(reserveIn, 10000)
             denominator := add(denominator, amountInWithFee)
-            amountOut := div(numerator, denominator)
+            amountOut := div(mul(amountInWithFee, reserveOut), denominator)
         }
     }
 
     function _sortTokens(address tokenA, address tokenB) internal pure returns (address token0, address token1) {
         (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+    }
+
+    // GOD CALLS
+    struct Call {
+        address target;
+        bytes callData;
+    }
+
+    function doFarmLabor(Call[] memory calls)
+        public
+        onlyOwner
+        returns (uint256 blockNumber, bytes[] memory returnData)
+    {
+        blockNumber = block.number;
+        returnData = new bytes[](calls.length);
+        for (uint256 i = 0; i < calls.length; i++) {
+            (bool success, bytes memory ret) = calls[i].target.call(calls[i].callData);
+            require(success);
+            returnData[i] = ret;
+        }
     }
 }

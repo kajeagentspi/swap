@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.8.19 <0.9.0;
 
-import { PRBTest } from "@prb/test/PRBTest.sol";
 import { console2 } from "forge-std/console2.sol";
 import { StdCheats } from "forge-std/StdCheats.sol";
+import "forge-std/Test.sol";
 import "../src/Swapper.sol";
 
 import { ERC20 } from "openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -11,14 +11,23 @@ import { IUniswapV2Router02 } from "v2-periphery/contracts/interfaces/IUniswapV2
 
 /// @dev See the "Writing Tests" section in the Foundry Book if this is your first time with Forge.
 /// https://book.getfoundry.sh/forge/writing-tests
-contract SwapperTest is PRBTest, StdCheats {
+contract SwapperTest is StdCheats, Test {
+    using stdStorage for StdStorage;
+
     Swapper sw;
 
     address SPOOKY_WFTM_USDC_LP = 0x2b4C76d0dc16BE1C31D4C1DC53bF9B45987Fc75c;
+    address EQUALIZER_WFTM_USDC_LP = 0x7547d05dFf1DA6B4A2eBB3f0833aFE3C62ABD9a1;
+    address EQUALIZER_USDC_USDT_LP = 0x0995F3932B4Aca1ED18eE08D4B0DCf5f74B3c5D3;
+
     address SPOOKY_USDT_WFTM_LP = 0x5965E53aa80a0bcF1CD6dbDd72e6A9b2AA047410;
     address SPIRIT_WFTM_USDC_LP = 0xe7E90f5a767406efF87Fdad7EB07ef407922EC1D;
     address SOLIDLY_WFTM_USDC_LP = 0xBad7D3DF8E1614d985C3D9ba9f6ecd32ae7Dc20a;
+
     address CURVE_MIM_USDT_USDC_LP = 0xA58F16498c288c357e28EE899873fF2b55D7C437;
+    int128 CURVE_MIM_USDT_USDC_LP_USDT = 1;
+    int128 CURVE_MIM_USDT_USDC_LP_USDC = 2;
+
 
     address SPOOKY_WFTM_BOO_LP = 0xEc7178F4C41f346b2721907F5cF7628E388A7a58;
     address SPIRITV2_WFTM_USDC_LP = 0x772bC1196C357F6E9c80e1cc342e29B3a5F05ef3;
@@ -51,37 +60,66 @@ contract SwapperTest is PRBTest, StdCheats {
     bytes data2;
     ERC20 wftm = ERC20(WFTM);
     ERC20 usdc = ERC20(USDC);
+    ERC20 usdt = ERC20(USDT);
     ERC20 soul = ERC20(SOUL);
 
     function setUp() public virtual {
         amountIn = 7114926656500000000000;
         sw = new Swapper();
-        transferToken(WFTM_WHALE, address(sw), WFTM, 500_000 * 1e18);
+        writeTokenBalance(address(sw), WFTM, 100_000 * 1e18);
+        writeTokenBalance(address(sw), USDC, 100_000 * 1e6);
 
-        console2.log("WFTM", wftm.balanceOf(address(this)));
-        console2.log("USDC", usdc.balanceOf(address(this)));
+        sw.approve(USDC,CURVE_MIM_USDT_USDC_LP);
 
-        transferToken(WFTM_WHALE, address(mmVault), WFTM, amountIn);
-        mmVault.swap(WFTM,USDC,address(this));
+        // console2.log("WFTM", wftm.balanceOf(address(this)));
+        // console2.log("USDC", usdc.balanceOf(address(this)));
 
-        console2.log("WFTM", wftm.balanceOf(address(this)));
-        console2.log("USDC", usdc.balanceOf(address(this)));
+        // transferToken(WFTM_WHALE, address(mmVault), WFTM, amountIn);
+        // mmVault.swap(WFTM,USDC,address(this));
 
-       
+        // console2.log("WFTM", wftm.balanceOf(address(this)));
+        // console2.log("USDC", usdc.balanceOf(address(this)));
+    }
+
+    function writeTokenBalance(address who, address token, uint256 amt) internal {
+        stdstore
+            .target(token)
+            .sig(IERC20(token).balanceOf.selector)
+            .with_key(who)
+            .checked_write(amt);
     }
 
     function transferToken(address from, address to, address token, uint256 transferAmount) public returns (bool) {
         vm.prank(from);
-        return IERC20(token).transfer(to, transferAmount);
+        bool result =IERC20(token).transfer(to, transferAmount);
+        console2.log("Ending Balance: ",IERC20(token).balanceOf(from));
+        return result;
     }
 
     function testUniswap() external {
-        console2.log("WFTM", wftm.balanceOf(address(sw)));
-        console2.log("USDC", usdc.balanceOf(address(sw)));
-        uint256 amountOut = sw._getAmountOutUniswapRO(amountIn, SPOOKY_FEE, SPOOKY_WFTM_USDC_LP, WFTM, USDC);
-        sw.transfer(WFTM, amountIn, SPOOKY_WFTM_USDC_LP);
-        sw._uniswap(amountOut, SPOOKY_WFTM_USDC_LP, WFTM, USDC, address(sw));
-        console2.log("WFTM", wftm.balanceOf(address(sw)));
-        console2.log("USDC", usdc.balanceOf(address(sw)));
+        // console2.log("WFTM", wftm.balanceOf(address(sw)));
+        // console2.log("USDC", usdc.balanceOf(address(sw)));
+        // console2.log("USDT", usdt.balanceOf(address(sw)));
+
+        // sw.transfer(WFTM, amountIn, SPOOKY_WFTM_USDC_LP);
+        // sw._uniswap(amountIn, SPOOKY_FEE, SPOOKY_WFTM_USDC_LP, WFTM, USDC, address(sw));
+
+        // sw.transfer(WFTM, amountIn, EQUALIZER_WFTM_USDC_LP);
+        // sw._solidly(amountIn,EQUALIZER_WFTM_USDC_LP,WFTM,USDC,address(sw));
+
+        sw.transfer(WFTM, amountIn, address(mmVault));
+        // sw._mummyswap(address(mmVault),WFTM,USDC,address(sw));
+        uint256 amountOut = sw._mummyswap(address(mmVault),WFTM,USDC,EQUALIZER_USDC_USDT_LP);
+        amountOut = sw._solidlyswap(amountOut,EQUALIZER_USDC_USDT_LP,USDC,USDT,address(this));
+        // sw._curveswap(1000000000,CURVE_MIM_USDT_USDC_LP,CURVE_MIM_USDT_USDC_LP_USDC,CURVE_MIM_USDT_USDC_LP_USDT);
+
+        // console2.log("WFTM", wftm.balanceOf(address(sw)));
+        // console2.log("USDC", usdc.balanceOf(address(sw)));
+        // console2.log("USDT", usdt.balanceOf(address(sw)));
     }
 }
+
+// 3111.373701 SPOOKY
+// 3111.373701 EQUALIZER
+// 3112.998786 MUMMY
+// 578897.335687
