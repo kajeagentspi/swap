@@ -197,6 +197,7 @@ contract Swapper {
                 amountIn=_curveswap(amountIn,pair,int128(uint128(tokenInIndex)),int128(uint128(tokenOutIndex)));
             }
         }
+        require(amountIn>=minAmountOut,"Not Enough");
     }
 
     // SWAPS
