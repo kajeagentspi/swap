@@ -31,6 +31,43 @@ interface CurveFi {
     function get_virtual_price() external view returns (uint256);
 }
 
+interface IAsset {
+// solhint-disable-previous-line no-empty-blocks
+}
+
+interface Balancer {
+    enum SwapKind {
+        GIVEN_IN,
+        GIVEN_OUT
+    }
+
+    struct SingleSwap {
+        bytes32 poolId;
+        SwapKind kind;
+        IAsset assetIn;
+        IAsset assetOut;
+        uint256 amount;
+        bytes userData;
+    }
+
+    struct FundManagement {
+        address sender;
+        bool fromInternalBalance;
+        address payable recipient;
+        bool toInternalBalance;
+    }
+
+    function swap(
+        SingleSwap memory singleSwap,
+        FundManagement memory funds,
+        uint256 limit,
+        uint256 deadline
+    )
+        external
+        payable
+        returns (uint256);
+}
+
 contract Swapper {
     event Received(address sender, uint256 amount);
 
@@ -41,6 +78,7 @@ contract Swapper {
     uint256 private constant SOLIDLY = 2;
     uint256 private constant GMX = 3;
     uint256 private constant CURVE = 4;
+    uint256 private constant BALANCER = 5;
 
     constructor() {
         owner = msg.sender;
@@ -65,10 +103,7 @@ contract Swapper {
     }
 
     function revoke(address _token, address _spender) public onlyOwner {
-        IERC20(_token).approve(
-            _spender,
-            0
-        );
+        IERC20(_token).approve(_spender, 0);
     }
 
     function approveMulti(address[] calldata _tokens, address _spender) public onlyOwner {
@@ -82,10 +117,7 @@ contract Swapper {
 
     function revokeMulti(address[] calldata _tokens, address _spender) public onlyOwner {
         for (uint256 i = 0; i < _tokens.length; i = unsafe_inc(i)) {
-            IERC20(_tokens[i]).approve(
-                _spender,
-                0
-            );
+            IERC20(_tokens[i]).approve(_spender, 0);
         }
     }
 
@@ -138,6 +170,7 @@ contract Swapper {
         // solidly 112=32+20+20+20+20
         // gmx      80=20+20+20+20
         // curve    54=32+20+1+1 use uint8 for indexes
+        // balancer 92=20+32+20+20
         // _swapData routeLength, dexType0, dexType1..., amountIn, minAmountOut, ,swapData0, swapData1...
         uint8 routeLength;
         uint256[5] memory dexTypes;
@@ -161,8 +194,9 @@ contract Swapper {
         currentIndex += 64; //increment index after reading amountIn
         address receiver;
         for (uint256 i = 0; i < routeLength; i = unsafe_inc(i)) {
-            // When last in route or curve (not actually needed)
-            if (i + 1 == routeLength || dexTypes[i] == CURVE || dexTypes[i + 1] == CURVE) {
+            // When last route, next is curve or next is balancer
+            if (i + 1 == routeLength || dexTypes[i] == CURVE || dexTypes[i + 1] == CURVE || dexTypes[i + 1] == BALANCER)
+            {
                 receiver = address(this);
             } else {
                 uint256 toAddressIndex = currentIndex + 60;
@@ -182,23 +216,21 @@ contract Swapper {
                         div(mload(add(add(_routeData, 0x20), add(currentIndex, 40))), 0x1000000000000000000000000)
                 }
                 currentIndex += 60;
-                if (i == 0|| dexTypes[i-1] == CURVE) {
+                if (i == 0 || dexTypes[i - 1] == CURVE) {
                     IERC20(tokenIn).transfer(pair, amountIn);
                 }
-                if(dexTypes[i]==UNISWAP){
+                if (dexTypes[i] == UNISWAP) {
                     uint16 _swapFee;
                     assembly {
                         _swapFee := mload(add(add(_routeData, 0x2), currentIndex))
                     }
                     uint256 swapFee = _swapFee;
-                    currentIndex+=2;
-                    amountIn=_uniswap(amountIn,pair,tokenIn,tokenOut,receiver,swapFee);
-                }
-                else if(dexTypes[i]==SOLIDLY){
-                    amountIn = _solidlyswap(amountIn,pair,tokenIn,tokenOut,receiver);
-                }
-                else if(dexTypes[i]==GMX){
-                    amountIn = _gmxswap(pair,tokenIn,tokenOut,receiver);
+                    currentIndex += 2;
+                    amountIn = _uniswap(amountIn, pair, tokenIn, tokenOut, receiver, swapFee);
+                } else if (dexTypes[i] == SOLIDLY) {
+                    amountIn = _solidlyswap(amountIn, pair, tokenIn, tokenOut, receiver);
+                } else if (dexTypes[i] == GMX) {
+                    amountIn = _gmxswap(pair, tokenIn, tokenOut, receiver);
                 }
             } else if (dexTypes[i] == CURVE) {
                 address pair;
@@ -210,10 +242,25 @@ contract Swapper {
                     tokenOutIndex := mload(add(add(_routeData, 0x1), add(currentIndex, 21)))
                 }
                 currentIndex += 22;
-                amountIn=_curveswap(amountIn,pair,int128(uint128(tokenInIndex)),int128(uint128(tokenOutIndex)));
+                amountIn = _curveswap(amountIn, pair, int128(uint128(tokenInIndex)), int128(uint128(tokenOutIndex)));
+            } else if (dexTypes[i] == BALANCER) {
+                address balancerVault;
+                bytes32 poolId;
+                address tokenIn;
+                address tokenOut;
+                assembly {
+                    balancerVault := div(mload(add(add(_routeData, 0x20), currentIndex)), 0x1000000000000000000000000)
+                    poolId := mload(add(add(_routeData, 0x20), add(currentIndex, 20)))
+                    tokenIn :=
+                        div(mload(add(add(_routeData, 0x20), add(currentIndex, 52))), 0x1000000000000000000000000)
+                    tokenOut :=
+                        div(mload(add(add(_routeData, 0x20), add(currentIndex, 72))), 0x1000000000000000000000000)
+                }
+                currentIndex += 92;
+                amountIn = _balancerswap(amountIn, balancerVault, poolId, tokenIn, tokenOut, receiver);
             }
         }
-        require(amountIn>=minAmountOut,"Not Enough");
+        require(amountIn >= minAmountOut, "Not Enough");
     }
 
     // SWAPS
@@ -228,7 +275,7 @@ contract Swapper {
         internal
         returns (uint256)
     {
-        (uint256 amountOut, bool reversed) = _getAmountOutUniswap(_amountIn, _pair, _tokenIn, _tokenOut,_swapFee);
+        (uint256 amountOut, bool reversed) = _getAmountOutUniswap(_amountIn, _pair, _tokenIn, _tokenOut, _swapFee);
         (uint256 amount0Out, uint256 amount1Out) = reversed ? (uint256(0), amountOut) : (amountOut, uint256(0));
         IUniswapV2Pair(_pair).swap(amount0Out, amount1Out, _receiver, new bytes(0));
         return amountOut;
@@ -278,6 +325,23 @@ contract Swapper {
         return amountOut;
     }
 
+    function _balancerswap(
+        uint256 _amountIn,
+        address _balancerVault,
+        bytes32 _poolId,
+        address _tokenIn,
+        address _tokenOut,
+        address _receiver
+    )
+        internal
+        returns (uint256)
+    {
+        Balancer.FundManagement memory fm = Balancer.FundManagement(address(this), false, payable(_receiver), false);
+        Balancer.SingleSwap memory ss =
+            Balancer.SingleSwap(_poolId, Balancer.SwapKind.GIVEN_IN, IAsset(_tokenIn), IAsset(_tokenOut), _amountIn, "");
+        return Balancer(_balancerVault).swap(ss, fm, 0, block.timestamp);
+    }
+
     // HELPERS
     function _getAmountOutUniswap(
         uint256 _amountIn,
@@ -289,12 +353,12 @@ contract Swapper {
         internal
         view
         returns (uint256 amountOut, bool reversed)
-    {   
+    {
         (address token0,) = _sortTokens(_tokenIn, _tokenOut);
         (uint256 reserve0, uint256 reserve1,) = IUniswapV2Pair(_pair).getReserves();
         reversed = _tokenIn == token0;
         (uint256 reserveIn, uint256 reserveOut) = reversed ? (reserve0, reserve1) : (reserve1, reserve0);
-        
+
         assembly {
             let amountInWithFee := mul(_amountIn, _swapFee)
             let numerator := mul(amountInWithFee, reserveOut)
