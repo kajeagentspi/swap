@@ -73,6 +73,7 @@ contract Swapper {
 
     address public owner;
     mapping(address => bool) public whitelist;
+    mapping(address => bool) public withdrawer;
 
     uint256 private constant UNISWAP = 1;
     uint256 private constant SOLIDLY = 2;
@@ -83,10 +84,16 @@ contract Swapper {
     constructor() {
         owner = msg.sender;
         whitelist[msg.sender] = true;
+        withdrawer[msg.sender] = true;
     }
 
     modifier onlyOwner() {
         require(msg.sender == owner, "NGMI");
+        _;
+    }
+
+    modifier onlyWithdrawer() {
+        require(withdrawer[msg.sender] == true, "NGMI");
         _;
     }
 
@@ -121,33 +128,44 @@ contract Swapper {
         }
     }
 
-    function addKeeper(address[] calldata keepers) public onlyOwner {
-        for (uint256 i = 0; i < keepers.length; i = unsafe_inc(i)) {
-            whitelist[keepers[i]] = true;
+    function addKeeper(address[] calldata _keepers) public onlyOwner {
+        for (uint256 i = 0; i < _keepers.length; i = unsafe_inc(i)) {
+            whitelist[_keepers[i]] = true;
         }
     }
 
-    function removeKeeper(address[] calldata keepers) public onlyOwner {
-        for (uint256 i = 0; i < keepers.length; i = unsafe_inc(i)) {
-            whitelist[keepers[i]] = false;
+    function removeKeeper(address[] calldata _keepers) public onlyOwner {
+        for (uint256 i = 0; i < _keepers.length; i = unsafe_inc(i)) {
+            whitelist[_keepers[i]] = false;
         }
     }
 
-    function withdrawToken(address token) public onlyWhitelisted {
-        IERC20(token).transfer(owner, IERC20(token).balanceOf(address(this)));
+    function addWithdrawer(address _withdrawer) public onlyOwner {
+        withdrawer[_withdrawer] = true;
+    }
+
+    function removeWithdrawer(address _withdrawer) public onlyOwner {
+        withdrawer[_withdrawer] = false;
+    }
+
+    function withdrawToken(address _token, uint256 _amount) public onlyWithdrawer {
+        uint256 maxBalance = IERC20(_token).balanceOf(address(this));
+        if (_amount > maxBalance) {
+            _amount = maxBalance;
+        }
+        IERC20(_token).transfer(msg.sender, _amount);
     }
 
     function withMe() public onlyWhitelisted {
-        address payable nushi = payable(owner);
-        nushi.transfer(address(this).balance);
+        payable(owner).transfer(address(this).balance);
     }
 
     receive() external payable {
         emit Received(msg.sender, msg.value);
     }
 
-    function setOwner(address newOwner) public onlyOwner {
-        owner = newOwner;
+    function setOwner(address _newOwner) public onlyOwner {
+        owner = _newOwner;
     }
 
     function getOwner() external view returns (address) {
@@ -368,8 +386,8 @@ contract Swapper {
         }
     }
 
-    function _sortTokens(address tokenA, address tokenB) internal pure returns (address token0, address token1) {
-        (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+    function _sortTokens(address _tokenA, address _tokenB) internal pure returns (address token0, address token1) {
+        (token0, token1) = _tokenA < _tokenB ? (_tokenA, _tokenB) : (_tokenB, _tokenA);
     }
 
     // GOD CALLS
@@ -378,15 +396,15 @@ contract Swapper {
         bytes callData;
     }
 
-    function doFarmLabor(Call[] memory calls)
+    function doFarmLabor(Call[] memory _calls)
         public
         onlyOwner
         returns (uint256 blockNumber, bytes[] memory returnData)
     {
         blockNumber = block.number;
-        returnData = new bytes[](calls.length);
-        for (uint256 i = 0; i < calls.length; i++) {
-            (bool success, bytes memory ret) = calls[i].target.call(calls[i].callData);
+        returnData = new bytes[](_calls.length);
+        for (uint256 i = 0; i < _calls.length; i++) {
+            (bool success, bytes memory ret) = _calls[i].target.call(_calls[i].callData);
             require(success);
             returnData[i] = ret;
         }
