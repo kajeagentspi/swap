@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.8.19;
 
+import { console2 } from "forge-std/console2.sol";
+
 interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
     function transfer(address to, uint256 amount) external returns (bool);
@@ -227,70 +229,65 @@ contract Swapper {
                 }
             }
             if (dexTypes[i] == UNISWAP || dexTypes[i] == SOLIDLY || dexTypes[i] == GMX) {
-                {
-                    address pair; //vault address in the case of balancer or gmx
-                    address tokenIn;
-                    address tokenOut;
+                address pair; //vault address in the case of balancer or gmx
+                address tokenIn;
+                address tokenOut;
+                assembly {
+                    pair := div(mload(add(add(_routeData, 0x20), currentIndex)), 0x1000000000000000000000000)
+                    tokenIn :=
+                        div(mload(add(add(_routeData, 0x20), add(currentIndex, 20))), 0x1000000000000000000000000)
+                    tokenOut :=
+                        div(mload(add(add(_routeData, 0x20), add(currentIndex, 40))), 0x1000000000000000000000000)
+                }
+                currentIndex += 60;
+                if (i == 0 || dexTypes[i - 1] == CURVE) {
+                    IERC20(tokenIn).transfer(pair, amountIn);
+                }
+                if (i + 1 == routeLength) {
+                    lastToken = tokenOut;
+                    balanceBefore = IERC20(tokenOut).balanceOf(address(this));
+                }
+                if (dexTypes[i] == UNISWAP) {
+                    uint16 _swapFee;
                     assembly {
-                        pair := div(mload(add(add(_routeData, 0x20), currentIndex)), 0x1000000000000000000000000)
-                        tokenIn :=
-                            div(mload(add(add(_routeData, 0x20), add(currentIndex, 20))), 0x1000000000000000000000000)
-                        tokenOut :=
-                            div(mload(add(add(_routeData, 0x20), add(currentIndex, 40))), 0x1000000000000000000000000)
+                        _swapFee := mload(add(add(_routeData, 0x2), currentIndex))
                     }
-                    currentIndex += 60;
-                    if (i == 0 || dexTypes[i - 1] == CURVE) {
-                        IERC20(tokenIn).transfer(pair, amountIn);
-                    }
-                    if (i + 1 == routeLength) {
-                        lastToken = tokenOut;
-                        balanceBefore = IERC20(tokenOut).balanceOf(address(this));
-                    }
-                    if (dexTypes[i] == UNISWAP) {
-                        uint16 _swapFee;
-                        assembly {
-                            _swapFee := mload(add(add(_routeData, 0x2), currentIndex))
-                        }
-                        uint256 swapFee = _swapFee;
-                        currentIndex += 2;
-                        amountIn = _uniswap(amountIn, pair, tokenIn, tokenOut, receiver, swapFee);
-                    } else if (dexTypes[i] == SOLIDLY) {
-                        amountIn = _solidlyswap(amountIn, pair, tokenIn, tokenOut, receiver);
-                    } else if (dexTypes[i] == GMX) {
-                        amountIn = _gmxswap(pair, tokenIn, tokenOut, receiver);
-                    }
+                    uint256 swapFee = _swapFee;
+                    currentIndex += 2;
+                    amountIn = _uniswap(amountIn, pair, tokenIn, tokenOut, receiver, swapFee);
+                } else if (dexTypes[i] == SOLIDLY) {
+                    amountIn = _solidlyswap(amountIn, pair, tokenIn, tokenOut, receiver);
+                } else if (dexTypes[i] == GMX) {
+                    amountIn = _gmxswap(pair, tokenIn, tokenOut, receiver);
                 }
             } else if (dexTypes[i] == CURVE) {
-                {
-                    address pair; //vault address in the case of balancer or gmx
-                    uint8 tokenInIndex;
-                    uint8 tokenOutIndex;
-                    assembly {
-                        pair := div(mload(add(add(_routeData, 0x20), currentIndex)), 0x1000000000000000000000000)
-                        tokenInIndex := mload(add(add(_routeData, 0x1), add(currentIndex, 20)))
-                        tokenOutIndex := mload(add(add(_routeData, 0x1), add(currentIndex, 21)))
-                    }
-                    currentIndex += 22;
-                    if (i + 1 == routeLength) {
-                        lastToken = CurveFi(pair).coins(tokenOutIndex);
-                        balanceBefore = IERC20(lastToken).balanceOf(address(this));
-                    }
-                    amountIn = _curveswap(amountIn, pair, int128(uint128(tokenInIndex)), int128(uint128(tokenOutIndex)));
+                address pair; //vault address in the case of balancer or gmx
+                uint8 tokenInIndex;
+                uint8 tokenOutIndex;
+                assembly {
+                    pair := div(mload(add(add(_routeData, 0x20), currentIndex)), 0x1000000000000000000000000)
+                    tokenInIndex := mload(add(add(_routeData, 0x1), add(currentIndex, 20)))
+                    tokenOutIndex := mload(add(add(_routeData, 0x1), add(currentIndex, 21)))
                 }
+                currentIndex += 22;
+                if (i + 1 == routeLength) {
+                    lastToken = CurveFi(pair).coins(tokenOutIndex);
+                    balanceBefore = IERC20(lastToken).balanceOf(address(this));
+                }
+                amountIn = _curveswap(amountIn, pair, int128(uint128(tokenInIndex)), int128(uint128(tokenOutIndex)));
             } else if (dexTypes[i] == BALANCER) {
-                {
-                    (address pair, bytes32 poolId, address tokenIn, address tokenOut) =
-                        parseBalancer(_routeData, currentIndex);
-                    currentIndex += 92;
-                    if (i + 1 == routeLength) {
-                        lastToken = tokenOut;
-                        balanceBefore = IERC20(lastToken).balanceOf(address(this));
-                    }
-                    amountIn = _balancerswap(amountIn, pair, poolId, tokenIn, tokenOut, receiver);
+                (address pair, bytes32 poolId, address tokenIn, address tokenOut) =
+                    parseBalancer(_routeData, currentIndex);
+                currentIndex += 92;
+                if (i + 1 == routeLength) {
+                    lastToken = tokenOut;
+                    balanceBefore = IERC20(lastToken).balanceOf(address(this));
                 }
+                amountIn = _balancerswap(amountIn, pair, poolId, tokenIn, tokenOut, receiver);
             }
         }
         uint256 balanceAfter = IERC20(lastToken).balanceOf(address(this));
+        console2.log(balanceBefore, balanceAfter, balanceAfter - balanceBefore, minAmountOut);
         require(balanceAfter - balanceBefore >= minAmountOut, "Not Enough");
     }
 
