@@ -83,7 +83,9 @@ contract SwapperTest is StdCheats, Test {
         sw = new Swapper();
         swAddress = address(sw);
         writeTokenBalance(address(sw), WFTM, 100_000 * 1e18);
-        // writeTokenBalance(address(sw), USDC, 100_000 * 1e6);
+        writeTokenBalance(address(sw), USDC, 100_000 * 1e6);
+        writeTokenBalance(address(sw), USDT, 100_000 * 1e6);
+        writeTokenBalance(address(sw), BOO, 100_000 * 1e18);
 
         sw.approve(USDC, CURVE_MIM_USDT_USDC_LP);
         sw.approve(USDT, CURVE_MIM_USDT_USDC_LP);
@@ -196,6 +198,119 @@ contract SwapperTest is StdCheats, Test {
         // console2.log("USDT", usdt.balanceOf(address(sw)));
         // console2.log("BOO", boo.balanceOf(address(sw)));
         // sw._balancerswap(amountIn,BEETHOVEN,BEETHOVEN_WFTM_USDC,WFTM,USDC,swAddress);
+    }
+
+    // function _f(uint256 x, uint256 y) internal pure returns (uint256) {
+    //     return (y / 1e18 * y * y / 1e18) / 1e18 * x + (x / 1e18 * x * x / 1e18) / 1e18 * y;
+    // }
+
+    // function _d(uint256 x0, uint256 y) internal pure returns (uint256) {
+    //     return 3 * x0 * (y * y / 1e18) / 1e18 + (x0 / 1e18 * x0 * x0 / 1e18);
+    // }
+
+    function _f(uint256 x0, uint256 y) internal returns (uint256) {
+        uint256 left = y * y;
+        left = left * y;
+        left = left / 1e18;
+        left = left / 1e18;
+        left = x0 * left;
+        left = left / 1e18;
+
+        uint256 right = x0 * x0;
+        right = right * x0;
+        right = right / 1e18;
+        right = right / 1e18;
+        right = right * y;
+        right = right / 1e18;
+        console2.log("left", left);
+        console2.log("right", right);
+        return left + right;
+    }
+
+    function _d(uint256 x0, uint256 y) internal pure returns (uint256) {
+        return 3 * x0 * (y * y / 1e18) / 1e18 + (x0 * x0 / 1e18 * x0 / 1e18);
+    }
+
+    function _get_y(uint256 x0, uint256 xy, uint256 y) public returns (uint256) {
+        console2.log("x0", x0);
+        console2.log("xy", xy);
+        console2.log("y", y);
+        for (uint256 i = 0; i < 255; i++) {
+            uint256 y_prev = y;
+            uint256 k = _f(x0, y);
+            console2.log(i, y_prev, k);
+            if (k < xy) {
+                uint256 dy = (xy - k) * 1e18 / _d(x0, y);
+                y = y + dy;
+            } else {
+                uint256 dy = (k - xy) * 1e18 / _d(x0, y);
+                y = y - dy;
+            }
+            if (y > y_prev) {
+                if (y - y_prev <= 1) {
+                    return y;
+                }
+            } else {
+                if (y_prev - y <= 1) {
+                    return y;
+                }
+            }
+        }
+        return y;
+    }
+
+    uint256 reserve0 = 29_439_746;
+    uint256 reserve1 = 24_458_857;
+    bool stable = true;
+    address token0 = 0x04068DA6C83AFCFA0e13ba15A6696662335D5B75;
+    address token1 = 0x049d68029688eAbF473097a2fC38ef61633A3C7A;
+    uint256 decimals0 = 1_000_000;
+    uint256 decimals1 = 1_000_000;
+
+    function getAmountOut(uint256 amountIn, address tokenIn) public returns (uint256) {
+        (uint256 _reserve0, uint256 _reserve1) = (reserve0, reserve1);
+        amountIn -= amountIn / 10_000; // remove fee from amount received
+        return _getAmountOut(amountIn, tokenIn, _reserve0, _reserve1);
+    }
+
+    function _getAmountOut(
+        uint256 amountIn,
+        address tokenIn,
+        uint256 _reserve0,
+        uint256 _reserve1
+    )
+        internal
+        returns (uint256)
+    {
+        if (stable) {
+            uint256 xy = _k(_reserve0, _reserve1);
+            _reserve0 = _reserve0 * 1e18 / decimals0;
+            _reserve1 = _reserve1 * 1e18 / decimals1;
+            (uint256 reserveA, uint256 reserveB) = tokenIn == token0 ? (_reserve0, _reserve1) : (_reserve1, _reserve0);
+            amountIn = tokenIn == token0 ? amountIn * 1e18 / decimals0 : amountIn * 1e18 / decimals1;
+            uint256 y = reserveB - _get_y(amountIn + reserveA, xy, reserveB);
+            return y * (tokenIn == token0 ? decimals1 : decimals0) / 1e18;
+        } else {
+            (uint256 reserveA, uint256 reserveB) = tokenIn == token0 ? (_reserve0, _reserve1) : (_reserve1, _reserve0);
+            return amountIn * reserveB / (reserveA + amountIn);
+        }
+    }
+
+    function _k(uint256 x, uint256 y) internal view returns (uint256) {
+        if (stable) {
+            uint256 _x = x * 1e18 / decimals0;
+            uint256 _y = y * 1e18 / decimals1;
+            uint256 _a = (_x * _y) / 1e18;
+            uint256 _b = ((_x * _x) / 1e18 + (_y * _y) / 1e18);
+            return _a * _b / 1e18; // x3y+y3x >= k
+        } else {
+            return x * y; // xy >= k
+        }
+    }
+
+    function testFD() external {
+        uint256 _y = getAmountOut(1_000_000, token0);
+        console.log("_y", _y);
     }
     // function testSwapGMX() external {
     //     sw.transfer(WFTM, amountIn, gmAdd);
