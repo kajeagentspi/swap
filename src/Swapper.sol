@@ -78,7 +78,7 @@ contract Swapper {
     mapping(address => bool) public whitelist;
     mapping(address => bool) public withdrawer;
 
-    uint256 private constant UNISWAP = 1;
+    uint256 private constant UNISWAPV2 = 1;
     uint256 private constant SOLIDLY = 2;
     uint256 private constant GMX = 3;
     uint256 private constant CURVE = 4;
@@ -187,10 +187,10 @@ contract Swapper {
 
     // SWAP MULTIPLE
     function swap(bytes memory _routeData) public onlyWhitelisted {
-        // uniswap 114=32+20+20+20+20+2
-        // solidly 112=32+20+20+20+20
-        // gmx      80=20+20+20+20
-        // curve    54=32+20+1+1 use uint8 for indexes
+        // uniswap  62=20+20+20+2
+        // solidly  60=20+20+20
+        // gmx      60=20+20+20
+        // curve    22=20+1+1 use uint8 for indexes
         // balancer 92=20+32+20+20
         // _swapData routeLength, dexType0, dexType1..., amountIn, minAmountOut, ,swapData0, swapData1...
         uint8 routeLength;
@@ -228,7 +228,7 @@ contract Swapper {
                     receiver := div(mload(add(add(_routeData, 0x20), toAddressIndex)), 0x1000000000000000000000000)
                 }
             }
-            if (dexTypes[i] == UNISWAP || dexTypes[i] == SOLIDLY || dexTypes[i] == GMX) {
+            if (dexTypes[i] == UNISWAPV2 || dexTypes[i] == SOLIDLY || dexTypes[i] == GMX) {
                 address pair; //vault address in the case of balancer or gmx
                 address tokenIn;
                 address tokenOut;
@@ -247,7 +247,7 @@ contract Swapper {
                     lastToken = tokenOut;
                     balanceBefore = IERC20(tokenOut).balanceOf(address(this));
                 }
-                if (dexTypes[i] == UNISWAP) {
+                if (dexTypes[i] == UNISWAPV2) {
                     uint16 _swapFee;
                     assembly {
                         _swapFee := mload(add(add(_routeData, 0x2), currentIndex))
