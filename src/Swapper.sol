@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.8.19;
 
-import { console2 } from "forge-std/console2.sol";
-
 interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
     function transfer(address to, uint256 amount) external returns (bool);
@@ -193,19 +191,7 @@ contract Swapper {
         // curve    22=20+1+1 use uint8 for indexes
         // balancer 92=20+32+20+20
         // _swapData routeLength, dexType0, dexType1..., amountIn, minAmountOut, ,swapData0, swapData1...
-        uint8 routeLength;
-        uint256[5] memory dexTypes;
-        assembly {
-            routeLength := mload(add(add(_routeData, 0x1), 0))
-        }
-        for (uint256 i = 1; i < routeLength + 1; i = unsafe_inc(i)) {
-            uint8 tempSize;
-            assembly {
-                tempSize := mload(add(add(_routeData, 0x1), i))
-            }
-            dexTypes[i - 1] = tempSize;
-        }
-        uint256 currentIndex = 1 + routeLength;
+        uint256 currentIndex = 0;
         uint256 amountIn;
         uint256 minAmountOut;
         assembly {
@@ -213,6 +199,22 @@ contract Swapper {
             minAmountOut := mload(add(add(_routeData, 0x20), add(currentIndex, 32)))
         }
         currentIndex += 64; //increment index after reading amountIn
+
+        uint8 routeLength;
+        uint256[5] memory dexTypes;
+        assembly {
+            routeLength := mload(add(add(_routeData, 0x1), currentIndex))
+        }
+
+        currentIndex += 1;
+        for (uint256 i = 0; i < routeLength; i = unsafe_inc(i)) {
+            uint8 tempType;
+            assembly {
+                tempType := mload(add(add(_routeData, 0x1), add(currentIndex, i)))
+            }
+            dexTypes[i] = tempType;
+        }
+        currentIndex += routeLength;
 
         uint256 balanceBefore;
         address receiver;
@@ -224,6 +226,9 @@ contract Swapper {
                 receiver = address(this);
             } else {
                 uint256 toAddressIndex = currentIndex + 60;
+                if (dexTypes[i] == UNISWAPV2) {
+                    toAddressIndex += 2;
+                }
                 assembly {
                     receiver := div(mload(add(add(_routeData, 0x20), toAddressIndex)), 0x1000000000000000000000000)
                 }
@@ -287,7 +292,6 @@ contract Swapper {
             }
         }
         uint256 balanceAfter = IERC20(lastToken).balanceOf(address(this));
-        console2.log(balanceBefore, balanceAfter, balanceAfter - balanceBefore, minAmountOut);
         require(balanceAfter - balanceBefore >= minAmountOut, "Not Enough");
     }
 
